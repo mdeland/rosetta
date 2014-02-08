@@ -4,10 +4,6 @@
 # IPython
 notebooks/.ipynb_checkpoints/*
 
-#ignore data folder
-**/data
-data/
-data/**
 log/
 
 # C extensions

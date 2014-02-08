@@ -9,7 +9,10 @@ from numpy.testing import assert_allclose
 import pandas as pd
 from pandas.util.testing import assert_frame_equal, assert_series_equal
 
-from rosetta.text import text_processors, vw_helpers, nlp, converters
+from rosetta.text import text_processors, vw_helpers, nlp, converters,\
+    streamers
+from rosetta.text.text_processors import TokenizerBasic
+from rosetta.text.streamers import TextFileStreamer, TextFileInfoDict
 from rosetta.common import DocIDError, TokenError
 
 
@@ -40,7 +43,7 @@ class TestTokenizerBasic(unittest.TestCase):
     """
     """
     def setUp(self):
-        self.Tokenizer = text_processors.TokenizerBasic
+        self.Tokenizer = TokenizerBasic
 
     def test_text_to_counter(self):
         text = "Hi there's:alot,of | food hi"
@@ -573,6 +576,87 @@ class TestConverters(unittest.TestCase):
         with open(temprtf_path) as f:
             self.assertTrue(isinstance(f, file))
         os.system('rm %s'%os.path.join(self.testtemp_path, 'test.txt'))
+
+
+class TestTextFileInfoDict(unittest.TestCase):
+    def setUp(self):
+        test_path = os.path.abspath('./rosetta/tests')
+        testdata_path = os.path.join(test_path, 'data')
+        self.path1 = os.path.join(
+            testdata_path, 'text_base_path_onefile', 'filea.txt')
+        streamer = TextFileStreamer(tokenizer=TokenizerBasic())
+        self.info_dict = TextFileInfoDict(self.path1, streamer)
+
+    def test_text(self):
+        text = self.info_dict['text']
+        self.assertEqual(text, 'This is filea\n')
+
+    def test_doc_id(self):
+        doc_id = self.info_dict['doc_id']
+        self.assertEqual(doc_id, 'filea')
+
+    def test_tokens(self):
+        tokens = self.info_dict['tokens']
+        # Load text and tokenizer just to simplify reading
+        text = self.info_dict['text']
+        tokenizer = self.info_dict.streamer.tokenizer
+        benchmark = tokenizer.text_to_token_list(text)
+        self.assertEqual(tokens, benchmark)
+
+    def test_mtime(self):
+        mtime = self.info_dict['mtime']
+        self.assertTrue(mtime > 0)
+
+    def test_atime(self):
+        atime = self.info_dict['atime']
+        self.assertTrue(atime > 0)
+
+    def test_size(self):
+        size = self.info_dict['size']
+        self.assertTrue(size > 0)
+
+    def test_lazy(self):
+        self.assertFalse(hasattr(self.info_dict, '_lazy__text'))
+        text = self.info_dict['text']
+        self.assertTrue(hasattr(self.info_dict, '_lazy__text'))
+        tokens = self.info_dict['tokens']
+
+
+class TestTextFileStreamer(unittest.TestCase):
+    def setUp(self):
+        test_path = os.path.abspath('./rosetta/tests')
+        text_base_path_onefile = os.path.join(
+            test_path, 'data', 'text_base_path_onefile')
+        text_base_path_twofiles = os.path.join(
+            test_path, 'data', 'text_base_path_twofiles')
+        self.streamer_onefile = TextFileStreamer(
+            text_base_path=text_base_path_onefile, tokenizer=TokenizerBasic(),
+            shuffle=False)
+        self.streamer_twofiles = TextFileStreamer(
+            text_base_path=text_base_path_twofiles, tokenizer=TokenizerBasic(),
+            shuffle=False)
+
+    def test_info_stream_1(self):
+        info_stream = self.streamer_onefile.info_stream()
+        info_dict1 = info_stream.next()
+        doc_id = info_dict1['doc_id']
+        self.assertEqual(doc_id, 'filea')
+        text = info_dict1['text']
+        self.assertEqual(text, 'This is filea\n')
+
+    def test_doc_id(self):
+        doc_id = self.streamer_twofiles.doc_id
+        self.assertEqual(sorted(doc_id), ['filea', 'fileb'])
+
+    def test_paths(self):
+        paths = self.streamer_twofiles.paths
+        self.assertTrue(len(paths) == 2)
+
+    def test_token_stream(self):
+        token_stream = self.streamer_onefile.token_stream()
+        tokens = token_stream.next()
+        # only filea is a "token" in the eyes of TokenizerBasic.
+        self.assertEqual(tokens, ['filea'])
 
 
 def cmd_exists(cmd):

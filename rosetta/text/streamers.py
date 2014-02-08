@@ -281,20 +281,23 @@ class TextFileStreamer(BaseStreamer):
             if index == limit:
                 raise StopIteration
 
-            with open(onepath, 'r') as f:
-                text = f.read()
-                doc_id = re.sub(
-                    self.name_strip, '', filefilter.path_to_name
-                    (onepath, strip_ext=False))
-                stat_dict = self._file_stat(onepath)
-                info_dict = {'text': text, 'cached_path': onepath,
-                        'doc_id': doc_id}
-                info_dict.update(stat_dict)
-                if self.tokenizer:
-                    info_dict['tokens'] = (
-                        self.tokenizer.text_to_token_list(text))
+            yield TextFileInfoDict(onepath, self)
 
-            yield info_dict
+            # Keep as example of info_dict made the "old fashioned" way, 
+            # populating entire dict every time.
+            #
+            #with open(onepath, 'r') as f:
+            #    text = f.read()
+            #    doc_id = re.sub(
+            #        self.name_strip, '', filefilter.path_to_name
+            #        (onepath, strip_ext=False))
+            #    stat_dict = self._file_stat(onepath)
+            #    info_dict = {'text': text, 'cached_path': onepath,
+            #            'doc_id': doc_id}
+            #    info_dict.update(stat_dict)
+            #    if self.tokenizer:
+            #        info_dict['tokens'] = (
+            #            self.tokenizer.text_to_token_list(text))
 
     def to_vw(self, outfile, n_jobs=1, chunksize=1000, raise_on_bad_id=True):
         """
@@ -368,3 +371,77 @@ def _group_to_sstr(streamer, formatter, raise_on_bad_id, path_group):
         group_results.append(tok_sstr)
 
     return group_results
+
+
+class TextFileInfoDict(object):
+    """
+    Mimicks a dictionary with "all" the information for TextFileStreamer.
+    """
+    def __init__(self, onepath, streamer):
+        """
+        Parameters
+        ----------
+        onepath : File, path, or buffer
+        streamer : TextFileStreamer
+        """
+        self.onepath = onepath
+        self.streamer = streamer
+
+    def __getitem__(self, key):
+        if key == 'text':
+            return self._text
+        elif key == 'doc_id':
+            return self._doc_id
+        elif key == 'mtime':
+            return self._mtime
+        elif key == 'atime':
+            return self._atime
+        elif key == 'size':
+            return self._size
+        elif key == 'cached_path':
+            return self._cached_path
+        elif key == 'tokens':
+            return self._tokens
+        else:
+            raise KeyError("TextFileInfoDict does not contain key %s" % key)
+
+    @lazyprop
+    def _text(self):
+        with smart_open(self.onepath, 'r') as f:
+            return f.read()
+
+    @lazyprop
+    def _doc_id(self):
+        doc_id = re.sub(
+            self.streamer.name_strip, '', filefilter.path_to_name
+            (self.onepath, strip_ext=False))
+
+        return doc_id
+
+    @lazyprop
+    def _stat_dict(self):
+        # Not to be used as a key in info_dict...just for access to _mtime etc.
+        return self.streamer._file_stat(self.onepath)
+
+    @property
+    def _mtime(self):
+        return self._stat_dict['mtime']
+
+    @property
+    def _atime(self):
+        return self._stat_dict['atime']
+
+    @property
+    def _size(self):
+        return self._stat_dict['size']
+
+    @property
+    def _cached_path(self):
+        return self.onepath
+
+    @lazyprop
+    def _tokens(self):
+        return self.streamer.tokenizer.text_to_token_list(self._text)
+
+
+
