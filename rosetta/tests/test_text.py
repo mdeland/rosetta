@@ -585,7 +585,7 @@ class TestTextFileInfoDict(unittest.TestCase):
         self.path1 = os.path.join(
             testdata_path, 'text_base_path_onefile', 'filea.txt')
         streamer = TextFileStreamer(tokenizer=TokenizerBasic())
-        self.info_dict = TextFileInfoDict(self.path1, streamer)
+        self.info_dict = TextFileInfoDict(streamer, self.path1)
 
     def test_text(self):
         text = self.info_dict['text']

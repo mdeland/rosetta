@@ -204,6 +204,10 @@ class TextFileStreamer(BaseStreamer):
         if tokenizer_func:
             self.tokenizer = text_processors.MakeTokenizer(tokenizer_func)
 
+    def _readtext(self, onepath):
+        with smart_open(onepath, 'r') as f:
+            return f.read()
+
     @lazyprop
     def paths(self):
         """
@@ -221,17 +225,20 @@ class TextFileStreamer(BaseStreamer):
 
         return paths
 
+    def _doc_id(self, onepath):
+        # Get one single doc_id.
+        doc_id = re.sub(
+            self.name_strip, '', filefilter.path_to_name
+            (onepath, strip_ext=False))
+
+        return doc_id
+
     @lazyprop
     def doc_id(self):
         """
         Get doc_id corresponding to all paths.
         """
-        regex = re.compile(self.name_strip)
-        doc_id = [
-            regex.sub('', filefilter.path_to_name(p, strip_ext=False))
-            for p in self.paths]
-
-        return doc_id
+        return [self._doc_id(p) for p in self.paths]
 
     @lazyprop
     def _doc_id_to_path(self):
@@ -244,18 +251,22 @@ class TextFileStreamer(BaseStreamer):
     @lazyprop
     def file_stat(self):
         """
-        Builds a dictionary of os.stats file info. Currently included
-        last modification time & last access time (seconds since epoch),
-        size (in bytes).
+        Builds a dictionary of os.stats file info by calling self._file_stat
         """
         return [self._file_stat(p) for p in self.paths]
 
     def _file_stat(self, path):
         """
         Retrieves os.stats info for file.
+        Currently includes:
+            last modification time & last access time (seconds since epoch),
+            size (in bytes).
         """
         return {'mtime': os.path.getmtime(path), 'atime': os.path.getatime(path),
                 'size': os.path.getsize(path)}
+
+    def _tokenize(self, text):
+        return self.tokenizer.text_to_token_list(text)
 
     def info_stream(self, paths=None, doc_id=None, limit=None):
         """
@@ -281,23 +292,7 @@ class TextFileStreamer(BaseStreamer):
             if index == limit:
                 raise StopIteration
 
-            yield TextFileInfoDict(onepath, self)
-
-            # Keep as example of info_dict made the "old fashioned" way, 
-            # populating entire dict every time.
-            #
-            #with open(onepath, 'r') as f:
-            #    text = f.read()
-            #    doc_id = re.sub(
-            #        self.name_strip, '', filefilter.path_to_name
-            #        (onepath, strip_ext=False))
-            #    stat_dict = self._file_stat(onepath)
-            #    info_dict = {'text': text, 'cached_path': onepath,
-            #            'doc_id': doc_id}
-            #    info_dict.update(stat_dict)
-            #    if self.tokenizer:
-            #        info_dict['tokens'] = (
-            #            self.tokenizer.text_to_token_list(text))
+            yield TextFileInfoDict(self, onepath)
 
     def to_vw(self, outfile, n_jobs=1, chunksize=1000, raise_on_bad_id=True):
         """
@@ -376,18 +371,25 @@ def _group_to_sstr(streamer, formatter, raise_on_bad_id, path_group):
 class TextFileInfoDict(object):
     """
     Mimicks a dictionary with "all" the information for TextFileStreamer.
+    This is a "dumb container", with all "real work" done by the streamer.
     """
-    def __init__(self, onepath, streamer):
+    def __init__(self, streamer, onepath):
         """
         Parameters
         ----------
-        onepath : File, path, or buffer
         streamer : TextFileStreamer
+        onepath : File, path, or buffer
         """
-        self.onepath = onepath
         self.streamer = streamer
+        self.onepath = onepath
 
     def __getitem__(self, key):
+        # Could be made cleaner by using a dict of functions...however, since
+        # these are (lazy) properties, simply writing e.g. self._text evaluates
+        # the method.  The work-around is to introduce a lazy_method decorator
+        # however, any method memoization makes assumptions about arguments,
+        # therefore cannot be general...therefore the pattern will be an
+        # odball.
         if key == 'text':
             return self._text
         elif key == 'doc_id':
@@ -403,25 +405,24 @@ class TextFileInfoDict(object):
         elif key == 'tokens':
             return self._tokens
         else:
-            raise KeyError("TextFileInfoDict does not contain key %s" % key)
-
-    @lazyprop
-    def _text(self):
-        with smart_open(self.onepath, 'r') as f:
-            return f.read()
+            raise KeyError("InfoDict does not contain key %s" % key)
 
     @lazyprop
     def _doc_id(self):
-        doc_id = re.sub(
-            self.streamer.name_strip, '', filefilter.path_to_name
-            (self.onepath, strip_ext=False))
-
-        return doc_id
+        return self.streamer._doc_id(self.onepath)
 
     @lazyprop
     def _stat_dict(self):
         # Not to be used as a key in info_dict...just for access to _mtime etc.
         return self.streamer._file_stat(self.onepath)
+
+    @lazyprop
+    def _tokens(self):
+        return self.streamer._tokenize(self._text)
+
+    @lazyprop
+    def _text(self):
+        return self.streamer._readtext(self.onepath)
 
     @property
     def _mtime(self):
@@ -438,10 +439,3 @@ class TextFileInfoDict(object):
     @property
     def _cached_path(self):
         return self.onepath
-
-    @lazyprop
-    def _tokens(self):
-        return self.streamer.tokenizer.text_to_token_list(self._text)
-
-
-
